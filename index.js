@@ -2,24 +2,45 @@ import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
 import dotenv from "dotenv";
-import twilio from "twilio";
+import nodemailer from "nodemailer";
 
 dotenv.config();
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+// Temporary store (use DB/Redis in production)
+let otpStore = {};
+
+// 🔹 Create Nodemailer transporter
+const transporter = nodemailer.createTransport({
+  service: "gmail", // or use SMTP
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
 // 🔹 Send OTP
 app.post("/send-otp", async (req, res) => {
   try {
-    const { phone } = req.body;
-    const verification = await client.verify.v2
-      .services(process.env.TWILIO_SERVICE_SID)
-      .verifications.create({ to: `+91${phone}`, channel: "sms" });
+    const { email } = req.body;
 
-    res.json({ success: true, status: verification.status });
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000);
+
+    // Save OTP with expiry (5 min)
+    otpStore[email] = { otp, expires: Date.now() + 5 * 60 * 1000 };
+
+    // Send email
+    await transporter.sendMail({
+      from: `"Auth System" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "Your OTP Code",
+      text: `Your OTP is ${otp}. It will expire in 5 minutes.`,
+    });
+
+    res.json({ success: true, message: "OTP sent to email" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: err.message });
@@ -27,17 +48,25 @@ app.post("/send-otp", async (req, res) => {
 });
 
 // 🔹 Verify OTP
-app.post("/verify-otp", async (req, res) => {
+app.post("/verify-otp", (req, res) => {
   try {
-    const { phone, otp } = req.body;
-    const verificationCheck = await client.verify.v2
-      .services(process.env.TWILIO_SERVICE_SID)
-      .verificationChecks.create({ to: `+91${phone}`, code: otp });
+    const { email, otp } = req.body;
 
-    if (verificationCheck.status === "approved") {
-      res.json({ success: true, message: "OTP Verified" });
+    const record = otpStore[email];
+    if (!record) {
+      return res.json({ success: false, message: "No OTP requested" });
+    }
+
+    if (Date.now() > record.expires) {
+      delete otpStore[email];
+      return res.json({ success: false, message: "OTP expired" });
+    }
+
+    if (record.otp == otp) {
+      delete otpStore[email]; // clear after verification
+      return res.json({ success: true, message: "OTP Verified" });
     } else {
-      res.json({ success: false, message: "Invalid OTP" });
+      return res.json({ success: false, message: "Invalid OTP" });
     }
   } catch (err) {
     console.error(err);

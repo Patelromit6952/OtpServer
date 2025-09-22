@@ -4,6 +4,7 @@ import bodyParser from "body-parser";
 import dotenv from "dotenv";
 import nodemailer from "nodemailer";
 import admin from "firebase-admin"; // 🔹 FCM
+import { AndroidApp } from "firebase-admin/project-management";
 
 dotenv.config();
 const app = express();
@@ -79,9 +80,11 @@ app.post("/send-notification", async (req, res) => {
       return res.status(400).json({ success: false, error: "Missing fields" });
     }
 
-    const message = {
-      notification: { title, body },
+   const message = {
       token,
+      notification: { title, body },
+      android: { priority: "high" },
+      apns: { headers: { "apns-priority": "10" } },
     };
 
     const response = await admin.messaging().send(message);

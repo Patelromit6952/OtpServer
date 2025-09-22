@@ -34,7 +34,7 @@ app.post("/send-otp", async (req, res) => {
 
     // Send email
     await transporter.sendMail({
-      from: `"Auth System" <${process.env.EMAIL_USER}>`,
+      from: `"Authentication from YaarKhata" <${process.env.EMAIL_USER}>`,
       to: email,
       subject: "Your OTP Code",
       text: `Your OTP is ${otp}. It will expire in 5 minutes.`,

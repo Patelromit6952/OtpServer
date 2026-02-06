@@ -3,7 +3,7 @@ import cors from "cors";
 import bodyParser from "body-parser";
 import dotenv from "dotenv";
 import admin from "firebase-admin"; // 🔹 FCM
-import sgMail from "@sendgrid/mail"; // 🔹 SendGrid
+import nodemailer from "nodemailer";
 
 dotenv.config();
 const app = express();
@@ -17,46 +17,70 @@ admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 console.log("✅ Firebase Admin initialized");
+const transporter = nodemailer.createTransport({
+  host: "smtp.zoho.in",
+  port: 465,
+  secure: true,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+transporter.verify((err, success) => {
+  if (err) {
+    console.log("❌ SMTP Verify Error:", err);
+  } else {
+    console.log("✅ SMTP Connected");
+  }
+});
 
-// 🔹 SendGrid Init
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 let otpStore = {};
 
-// ✅ Send OTP with SendGrid
 app.post("/send-otp", async (req, res) => {
   try {
     const { email } = req.body;
-    const otp = Math.floor(100000 + Math.random() * 900000);
-    otpStore[email] = { otp, expires: Date.now() + 5 * 60 * 1000 };
 
-    const msg = {
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email required" });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000);
+
+    otpStore[email] = {
+      otp,
+      expires: Date.now() + 5 * 60 * 1000, // 5 min
+    };
+
+    const mailOptions = {
+      from: `"YaarKhata" <${process.env.EMAIL_USER}>`,
       to: email,
-      from: process.env.SENDGRID_SENDER, // must be a verified sender in SendGrid
       subject: "Your OTP Code - YaarKhata",
       html: `
-        <!DOCTYPE html>
-        <html>
-        <body style="font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;">
-          <div style="max-width:600px; margin:auto; background:#ffffff; padding:30px; border-radius:8px; text-align:center;">
-            <h2 style="color:#1a73e8;">🔐 YaarKhata Verification</h2>
-            <p style="font-size:16px;">Your One-Time Password (OTP) is:</p>
-            <h1 style="letter-spacing:4px; color:#333333;">${otp}</h1>
-            <p style="color:#666666;">This code will expire in <b>5 minutes</b>.</p>
-          </div>
-          <p style="text-align:center; font-size:12px; color:#999;">If you didn’t request this code, please ignore this email.</p>
-        </body>
-        </html>
+        <div style="font-family:Arial; padding:20px;">
+          <h2 style="color:#1a73e8;">🔐 YaarKhata Verification</h2>
+          <p>Your OTP is:</p>
+          <h1>${otp}</h1>
+          <p>This code expires in 5 minutes.</p>
+        </div>
       `,
     };
 
-    await sgMail.send(msg);
-    res.json({ success: true, message: "OTP sent to email" });
+    await transporter.sendMail(mailOptions);
+    res.json({
+      success: true,
+      message: "OTP sent successfully",
+    });
   } catch (err) {
-    console.error("❌ Error sending email:", err.response?.body || err.message);
-    res.status(500).json({ success: false, error: err.message });
+    console.error("❌ Email Error:", err);
+
+    res.status(500).json({
+      success: false,
+      error: "Failed to send OTP",
+    });
   }
 });
+
 
 // ✅ Verify OTP
 app.post("/verify-otp", (req, res) => {
